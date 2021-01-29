@@ -85,17 +85,21 @@ Optional arguments ARGS are composed of a plist with the following keys:
          (default-command  (plist-get args :command))
          (buffer-name      (format "*%s*" name))
          (compile-symbol   name)
+         (variable-symbol  (intern (format "%s-command" name)))
+         (history-symbol   (intern (format "%s-history" name)))
          (recompile-symbol (intern (format "re%s" name)))
          (dwim-symbol      (intern (format "%s-dwim" name)))
          (hydra-symbol     (intern (format "%s-hydra" name)))
-         (let-form `((compilation-buffer-name-function
-                      (lambda (mode) "" ,buffer-name)))))
+         (let-form `((compile-command ,variable-symbol)
+                     (compile-history ,history-symbol)
+                     (compilation-buffer-name-function
+                      (lambda (mode) "" ,buffer-name))))
+         (stash `((setq ,variable-symbol compile-command)
+                  (setq ,history-symbol compile-history))))
     (when (fboundp compile-symbol)
       (warn "redefining command `%s'" name))
     (when (fboundp recompile-symbol)
       (warn "redefining command `re%s'" name))
-    (when (not (null default-command))
-      (push `(compile-command ,default-command) let-form))
     `(prog1
          (defun ,dwim-symbol (argp)
            ,(format
@@ -131,7 +135,8 @@ compilation-related commands:
 results in the %s buffer." buffer-name)
          (interactive)
          (let ,let-form
-           (call-interactively #'compile)))
+           (call-interactively #'compile)
+           ,@stash))
 
        (defun ,recompile-symbol ()
          ,(format
@@ -141,8 +146,17 @@ last compilation parameters from buffer %s." buffer-name)
          (if (get-buffer ,buffer-name)
              (with-current-buffer ,buffer-name
                (let ,let-form
-                 (call-interactively #'recompile)))
+                 (call-interactively #'recompile)
+                 ,@stash))
            (call-interactively #',compile-symbol)))
+
+       (defcustom ,variable-symbol (purecopy ,(or default-command 'compile-command))
+         ,(format "Similar to `compile-command', but for `%s'." name)
+         :type 'string
+         :group 'compilation)
+       (put ',variable-symbol 'safe-local-variable (get 'compile-command 'safe-local-variable))
+
+       (defvar ,history-symbol nil)
 
        (put ',dwim-symbol :alternate-hydra
             (defhydra ,hydra-symbol (:exit t)
